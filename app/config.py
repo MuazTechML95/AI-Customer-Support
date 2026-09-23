@@ -1,159 +1,297 @@
-"""
+""""
 config.py
 ---------
-WHAT THIS FILE DOES:
-This is the SINGLE SOURCE OF TRUTH for all configuration in the project.
-Every other file that needs a setting (API key, model name, folder path, etc.)
-imports the `settings` object from this file instead of reading os.environ
-directly. This keeps configuration centralized and easy to change.
+Central configuration for the SupportAI application.
 
-WHERE VALUES COME FROM:
-Values are loaded from a `.env` file (see .env.example for the template) using
-python-dotenv. This means secrets (like API keys) never get hard-coded into
-the source code and never get committed to git (.env is in .gitignore).
+Configuration priority:
+1. Environment variables / Streamlit Cloud Secrets
+2. Local .env file
+3. Safe default values
 
-HOW TO CHANGE SETTINGS:
-1. Copy `.env.example` to `.env`
-2. Fill in your own values (API key, model name, etc.)
-3. Restart the app - config.py reads .env once at startup.
-
-WHAT TO EDIT IF YOU WANT TO...
-- Switch LLM provider (OpenAI <-> Groq <-> Anthropic): change LLM_PROVIDER and LLM_MODEL in .env
-- Switch embedding model: change EMBEDDING_MODEL in .env
-- Change how many chunks are retrieved: change RETRIEVAL_TOP_K in .env
-- Change the "confidence" cutoff for unsupported questions: change SIMILARITY_THRESHOLD in .env
+For production, API keys must NEVER be hard-coded.
 """
 
 import os
 from dataclasses import dataclass, field
+
 from dotenv import load_dotenv
 
-# Load variables from a .env file in the project root into the process environment.
-# If .env does not exist, this simply does nothing (no crash) - useful for Docker
-# environments where env vars are injected directly instead of via a file.
+
+# ---------------------------------------------------------------------------
+# LOAD ENVIRONMENT VARIABLES
+# ---------------------------------------------------------------------------
+
+# Loads values from local .env when running locally.
+# In Streamlit Cloud, values can be provided through Secrets/environment vars.
 load_dotenv()
 
-# Providers supported by app/rag/generator.py's _call_llm(). Kept as a single
-# constant here so config validation and generator branching never drift apart.
-SUPPORTED_LLM_PROVIDERS = ("openai", "groq", "anthropic")
 
+# ---------------------------------------------------------------------------
+# SUPPORTED LLM PROVIDERS
+# ---------------------------------------------------------------------------
+
+SUPPORTED_LLM_PROVIDERS = (
+    "openai",
+    "groq",
+    "anthropic",
+)
+
+
+# ---------------------------------------------------------------------------
+# HELPER FUNCTIONS
+# ---------------------------------------------------------------------------
 
 def _get_bool(env_name: str, default: bool) -> bool:
-    """Small helper: reads an env var and converts 'true'/'false' strings to bool."""
-    val = os.getenv(env_name)
-    if val is None:
-        return default
-    return val.strip().lower() in ("1", "true", "yes", "on")
+    """Read an environment variable and convert it to a boolean."""
 
+    value = os.getenv(env_name)
+
+    if value is None:
+        return default
+
+    return value.strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+# ---------------------------------------------------------------------------
+# SETTINGS
+# ---------------------------------------------------------------------------
 
 @dataclass
 class Settings:
+
     # ------------------------------------------------------------------
     # LLM SETTINGS
     # ------------------------------------------------------------------
-    # Which LLM provider to call. Supported: "openai", "groq", or "anthropic".
-    # CHANGE THIS if you want to switch providers without touching code -
-    # generator.py reads this value and branches accordingly.
-    llm_provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "openai"))
 
-    # The actual model name sent to the provider's API.
-    # Examples: "gpt-4o-mini" (OpenAI), "llama-3.3-70b-versatile" (Groq),
-    # "claude-sonnet-4-5" (Anthropic)
-    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gpt-4o-mini"))
+    # Groq is the default provider for this project.
+    llm_provider: str = field(
+        default_factory=lambda: os.getenv(
+            "LLM_PROVIDER",
+            "groq",
+        )
+    )
 
-    # API key for whichever provider you selected above.
-    # NEVER hard-code this. NEVER print/log this value anywhere.
-    llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
+    # Groq model used by the application.
+    #
+    # This can be overridden through:
+    # LLM_MODEL
+    llm_model: str = field(
+        default_factory=lambda: os.getenv(
+            "LLM_MODEL",
+            "openai/gpt-oss-120b",
+        )
+    )
 
-    # Max tokens the LLM is allowed to generate per answer (keeps cost/latency bounded).
-    llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("LLM_MAX_TOKENS", "500")))
+    # API key.
+    #
+    # NEVER hard-code the real API key here.
+    llm_api_key: str = field(
+        default_factory=lambda: os.getenv(
+            "LLM_API_KEY",
+            "",
+        )
+    )
 
-    # Temperature controls randomness. Kept LOW (0-0.3) on purpose because this is a
-    # factual support bot, not a creative writer - we want consistent, grounded answers.
-    llm_temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.2")))
+    # Maximum number of generated tokens.
+    llm_max_tokens: int = field(
+        default_factory=lambda: int(
+            os.getenv(
+                "LLM_MAX_TOKENS",
+                "500",
+            )
+        )
+    )
+
+    # Lower temperature keeps customer-support answers
+    # more consistent and factual.
+    llm_temperature: float = field(
+        default_factory=lambda: float(
+            os.getenv(
+                "LLM_TEMPERATURE",
+                "0.2",
+            )
+        )
+    )
 
     # ------------------------------------------------------------------
     # EMBEDDING SETTINGS
     # ------------------------------------------------------------------
-    # Local, free, offline embedding model (via sentence-transformers).
-    # CHANGE THIS if you want a different embedding model. If you switch to an
-    # API-based embedding model (e.g. OpenAI's text-embedding-3-small), you would
-    # also need to update embeddings.py to call that API instead of a local model.
+
     embedding_model: str = field(
-        default_factory=lambda: os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        default_factory=lambda: os.getenv(
+            "EMBEDDING_MODEL",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        )
     )
 
     # ------------------------------------------------------------------
     # VECTOR STORE SETTINGS
     # ------------------------------------------------------------------
-    # Folder where the Chroma persistent database lives on disk.
-    vector_store_path: str = field(default_factory=lambda: os.getenv("VECTOR_STORE_PATH", "vectorstore"))
 
-    # Name of the Chroma "collection" (like a table name inside the vector DB).
-    collection_name: str = field(default_factory=lambda: os.getenv("COLLECTION_NAME", "novacart_kb"))
+    vector_store_path: str = field(
+        default_factory=lambda: os.getenv(
+            "VECTOR_STORE_PATH",
+            "vectorstore",
+        )
+    )
+
+    collection_name: str = field(
+        default_factory=lambda: os.getenv(
+            "COLLECTION_NAME",
+            "novacart_kb",
+        )
+    )
 
     # ------------------------------------------------------------------
     # RAG / RETRIEVAL SETTINGS
     # ------------------------------------------------------------------
-    # Folder containing the raw knowledge base documents (.md files).
-    knowledge_base_path: str = field(default_factory=lambda: os.getenv("KNOWLEDGE_BASE_PATH", "data/knowledge_base"))
 
-    # Chunk size and overlap (measured in characters here, for simplicity/predictability).
-    # CHANGE THESE if your documents are much longer/shorter than typical FAQ/policy text.
-    chunk_size: int = field(default_factory=lambda: int(os.getenv("CHUNK_SIZE", "800")))
-    chunk_overlap: int = field(default_factory=lambda: int(os.getenv("CHUNK_OVERLAP", "100")))
+    knowledge_base_path: str = field(
+        default_factory=lambda: os.getenv(
+            "KNOWLEDGE_BASE_PATH",
+            "data/knowledge_base",
+        )
+    )
 
-    # How many chunks to retrieve per query. Higher = more context but more tokens/cost.
-    retrieval_top_k: int = field(default_factory=lambda: int(os.getenv("RETRIEVAL_TOP_K", "4")))
+    chunk_size: int = field(
+        default_factory=lambda: int(
+            os.getenv(
+                "CHUNK_SIZE",
+                "800",
+            )
+        )
+    )
 
-    # Similarity threshold (0-1, higher = stricter). Chroma returns a "distance" - we
-    # convert it to a similarity score in retriever.py. If the BEST chunk's similarity
-    # is below this threshold, we treat the query as "not covered by the knowledge base"
-    # and skip calling the LLM for a KB-grounded answer (this is what prevents
-    # hallucination on off-topic questions).
-    # CHANGE THIS if the bot is either too strict (rejecting valid questions) or too
-    # lenient (answering things it shouldn't) - raise to be stricter, lower to be looser.
-    similarity_threshold: float = field(default_factory=lambda: float(os.getenv("SIMILARITY_THRESHOLD", "0.35")))
+    chunk_overlap: int = field(
+        default_factory=lambda: int(
+            os.getenv(
+                "CHUNK_OVERLAP",
+                "100",
+            )
+        )
+    )
+
+    retrieval_top_k: int = field(
+        default_factory=lambda: int(
+            os.getenv(
+                "RETRIEVAL_TOP_K",
+                "4",
+            )
+        )
+    )
+
+    similarity_threshold: float = field(
+        default_factory=lambda: float(
+            os.getenv(
+                "SIMILARITY_THRESHOLD",
+                "0.35",
+            )
+        )
+    )
 
     # ------------------------------------------------------------------
     # SESSION SETTINGS
     # ------------------------------------------------------------------
-    # How many previous turns (user+bot pairs) to include as conversation context
-    # when answering a follow-up question. CHANGE THIS to give the bot a longer or
-    # shorter "memory" window.
-    max_history_turns: int = field(default_factory=lambda: int(os.getenv("MAX_HISTORY_TURNS", "5")))
+
+    max_history_turns: int = field(
+        default_factory=lambda: int(
+            os.getenv(
+                "MAX_HISTORY_TURNS",
+                "5",
+            )
+        )
+    )
 
     # ------------------------------------------------------------------
     # APP SETTINGS
     # ------------------------------------------------------------------
-    app_name: str = field(default_factory=lambda: os.getenv("APP_NAME", "SupportAI"))
-    company_name: str = field(default_factory=lambda: os.getenv("COMPANY_NAME", "NovaCart"))
-    debug: bool = field(default_factory=lambda: _get_bool("DEBUG", False))
+
+    app_name: str = field(
+        default_factory=lambda: os.getenv(
+            "APP_NAME",
+            "SupportAI",
+        )
+    )
+
+    company_name: str = field(
+        default_factory=lambda: os.getenv(
+            "COMPANY_NAME",
+            "NovaCart",
+        )
+    )
+
+    debug: bool = field(
+        default_factory=lambda: _get_bool(
+            "DEBUG",
+            False,
+        )
+    )
+
+    # ------------------------------------------------------------------
+    # VALIDATION
+    # ------------------------------------------------------------------
 
     def validate(self) -> list[str]:
         """
-        Checks that required settings are present and sane.
-        Returns a list of human-readable error strings (empty list = all good).
-        CALLED FROM: app/main.py at startup, and shown in the Streamlit UI if it fails,
-        so the user gets a friendly message instead of a random crash/stack trace.
+        Validate application configuration.
+
+        Returns:
+            list[str]: Empty list when configuration is valid.
         """
+
         errors = []
+
+        # API key must exist.
         if not self.llm_api_key:
             errors.append(
-                "LLM_API_KEY is not set. Copy .env.example to .env and add your API key."
+                "LLM_API_KEY is not set. "
+                "Add your API key through .env locally "
+                "or Streamlit Secrets in production."
             )
+
+        # Provider must be supported.
         if self.llm_provider not in SUPPORTED_LLM_PROVIDERS:
             errors.append(
-                f"LLM_PROVIDER must be one of {SUPPORTED_LLM_PROVIDERS}, got '{self.llm_provider}'."
+                f"LLM_PROVIDER must be one of "
+                f"{SUPPORTED_LLM_PROVIDERS}, "
+                f"got '{self.llm_provider}'."
             )
+
+        # Chunk configuration.
         if self.chunk_overlap >= self.chunk_size:
-            errors.append("CHUNK_OVERLAP must be smaller than CHUNK_SIZE.")
-        if not (0.0 <= self.similarity_threshold <= 1.0):
-            errors.append("SIMILARITY_THRESHOLD must be between 0 and 1.")
+            errors.append(
+                "CHUNK_OVERLAP must be smaller than CHUNK_SIZE."
+            )
+
+        # Similarity threshold.
+        if not 0.0 <= self.similarity_threshold <= 1.0:
+            errors.append(
+                "SIMILARITY_THRESHOLD must be between 0 and 1."
+            )
+
+        # Token configuration.
+        if self.llm_max_tokens <= 0:
+            errors.append(
+                "LLM_MAX_TOKENS must be greater than 0."
+            )
+
+        # Temperature configuration.
+        if not 0.0 <= self.llm_temperature <= 2.0:
+            errors.append(
+                "LLM_TEMPERATURE must be between 0 and 2."
+            )
+
         return errors
 
 
-# A single shared instance imported everywhere else in the app, e.g.:
-#   from app.config import settings
-#   print(settings.llm_model)
+# ---------------------------------------------------------------------------
+# SHARED SETTINGS INSTANCE
+# ---------------------------------------------------------------------------
+
 settings = Settings()
+
