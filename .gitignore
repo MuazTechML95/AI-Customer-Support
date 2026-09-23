@@ -1,0 +1,19 @@
+﻿# Environment & secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Vector store (regenerable, don't commit large binary index)
+vectorstore/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

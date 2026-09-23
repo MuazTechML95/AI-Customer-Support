@@ -1,0 +1,22 @@
+# ---------------------------------------------------------------------------
+# requirements.txt
+# Install with: pip install -r requirements.txt
+# ---------------------------------------------------------------------------
+
+# --- UI ---
+streamlit>=1.38.0
+
+# --- RAG core ---
+chromadb>=0.5.5
+sentence-transformers>=3.0.1
+
+# --- LLM SDKs (only the one matching your LLM_PROVIDER in .env is actually used) ---
+openai>=1.40.0
+anthropic>=0.34.0
+
+# --- Document/config utilities ---
+python-frontmatter>=1.1.0
+python-dotenv>=1.0.1
+
+# --- Testing ---
+pytest>=8.3.0
